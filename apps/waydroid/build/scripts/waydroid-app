@@ -1,0 +1,25 @@
+#!/bin/bash
+# Launch a single Android app on the CORRECT session bus.
+#
+# Same rationale as waydroid-ui: gow's launcher() splices our command line into
+# a sway config file where ',' is a command separator, and a D-Bus address from
+# dbus-daemon always carries a ",guid=..." suffix. startup.sh therefore exports
+# the comma-free socket path in WAYDROID_BUS_EXPORT and runs this script, whose
+# name contains no comma. The address is recomposed here, in a real shell.
+#
+# Usage: waydroid-app <android.package.name>
+
+set -u
+
+if [ $# -lt 1 ]; then
+    echo "[waydroid-app] usage: waydroid-app <package>" >&2
+    exit 2
+fi
+
+if [ -n "${WAYDROID_BUS_EXPORT:-}" ]; then
+    export DBUS_SESSION_BUS_ADDRESS="${WAYDROID_BUS_EXPORT}"
+fi
+
+echo "[waydroid-app] pkg=$1 bus=${DBUS_SESSION_BUS_ADDRESS:-<none>}" >&2
+
+exec /usr/bin/waydroid app launch "$1"

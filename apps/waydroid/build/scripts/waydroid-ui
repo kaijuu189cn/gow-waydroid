@@ -1,0 +1,51 @@
+#!/bin/bash
+# Launch the full Waydroid UI on the CORRECT session bus.
+#
+# Why this wrapper exists
+# ----------------------
+# gow's `launcher()` starts sway via:
+#
+#     dbus-run-session -- sway --unsupported-gpu
+#
+# `dbus-run-session` ALWAYS creates a brand new session bus and exports its
+# address, so sway -- and everything sway spawns via `exec` -- inherits a bus
+# on which no Waydroid session service exists. `waydroid show-full-ui` then
+# falls back to `session_manager.start()`, and because the container manager is
+# already tracking a session it dies with:
+#
+#     RuntimeError: Already tracking a session
+#
+# killing the whole container ~3s after launch (exit code 143).
+#
+# We cannot simply write `env DBUS_SESSION_BUS_ADDRESS=<addr> waydroid ...`
+# into the exec line, because launcher() splices that text straight into the
+# sway config, and sway treats ',' as a command separator -- while dbus-daemon
+# always appends ",guid=...". The line is torn apart and rejected:
+#
+#     Error on line '...guid=ec8a54...': Unknown/invalid command 'guid=...'
+#
+# So startup.sh exports the comma-free socket path in WAYDROID_BUS_EXPORT and
+# the exec line just runs this script, whose name contains no comma. We
+# recompose the address here, inside a normal shell, where commas are harmless.
+
+set -u
+
+if [ -n "${WAYDROID_BUS_EXPORT:-}" ]; then
+    export DBUS_SESSION_BUS_ADDRESS="${WAYDROID_BUS_EXPORT}"
+fi
+
+echo "[waydroid-ui] bus=${DBUS_SESSION_BUS_ADDRESS:-<none>}" >&2
+
+# If the address points at a unix socket, make sure it is really there; a
+# stale path would make GDK print "Failed to connect to user scope bus".
+if [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+    _p="${DBUS_SESSION_BUS_ADDRESS#unix:path=}"
+    _p="${_p%%,*}"
+    if [ -S "$_p" ]; then
+        echo "[waydroid-ui] socket present: $_p" >&2
+    else
+        echo "[waydroid-ui] WARNING: socket NOT present: $_p" >&2
+    fi
+fi
+
+exec /usr/bin/waydroid show-full-ui

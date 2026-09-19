@@ -1,0 +1,75 @@
+[[apps]]
+title = "Waydroid"
+icon_png_path = "https://games-on-whales.github.io/wildlife/apps/waydroid/assets/icon.png"
+
+[apps.runner]
+type = "docker"
+name = "WolfWaydroid"
+image = "ghcr.io/games-on-whales/waydroid:edge"
+env = [
+    # NO nested sway.
+    #
+    # Waydroid brings its OWN Wayland compositor: `waydroid show-full-ui`
+    # renders the Android desktop straight into whatever $WAYLAND_DISPLAY
+    # points at, and under Wolf that is already the virtual compositor the
+    # Moonlight stream captures. An extra sway in between buys nothing and
+    # actively hurts:
+    #
+    #   * it puts a second compositor in the pixel path (added latency and
+    #     an extra copy of every frame),
+    #   * gow's launch-comp.sh turns the app command into a sway `exec` line,
+    #     so when the UI exits the wrapper runs `killall sway` -- and the
+    #     session dies with it instead of restarting cleanly,
+    #   * the kiosk workarounds in startup.sh only exist to hide sway's bar,
+    #     borders and gaps; with no sway there is nothing to hide.
+    #
+    # startup.sh handles the compositor-less path explicitly ("Compositor:
+    # none"): it resolves $WAYLAND_DISPLAY to an absolute path and runs
+    # Waydroid directly against it. Set RUN_SWAY=true only to debug.
+    "RUN_SWAY=false",
+    "GOW_REQUIRED_DEVICES=/dev/input/* /dev/dri/* /dev/nvidia*",
+]
+devices = []
+ports = []
+# Waydroid is the most privileged app in this repo, and deliberately so:
+# it is a container manager (LXC) that boots a full Android system, so it
+# needs strictly more than the Steam/Lutris tier.
+#
+#   SYS_ADMIN  - mount binderfs (Android's IPC transport) and let LXC
+#                create the nested Android container. Without it Waydroid
+#                cannot start at all. This is the same capability Steam and
+#                Lutris need for their sandboxes, but here it is load-bearing
+#                rather than merely tolerated.
+#   NET_ADMIN  - create the waydroid0 bridge, set ip_forward and install
+#                the NAT rules Android needs for network access.
+#   MKNOD      - create the binder/ashmem device nodes inside devtmpfs.
+#   NET_RAW    - required by Android's network stack / DHCP client.
+#
+# IpcMode host is required so the Android container's binder and shared
+# memory semantics line up with what Waydroid's init expects; running it
+# in a private IPC namespace makes Android's servicemanager fail to
+# register.
+#
+# Binds: none here. Android's userdata lives OUTSIDE /var/lib/waydroid:
+# Waydroid puts it at its "host data path" ($XDG_DATA_HOME/waydroid/data,
+# i.e. /root/.local/share/waydroid/data for root) and bind-mounts that into
+# the nested Android container as /data (see the generated
+# lxc/waydroid/config_session). That path sits in the *outer* container's
+# writable layer, so apps/games/save data installed into Android would be
+# destroyed whenever Wolf recreates the container. Instead of a docker bind
+# (which cannot reference Wolf's per-app state folder from this template),
+# the image's init scripts symlink that directory onto the persistent
+# /var/lib/waydroid volume -- see overlay/etc/cont-init.d/20-waydroid-setup.sh.
+base_create_json = """
+{
+  "HostConfig": {
+    "IpcMode": "host",
+    "CapAdd": ["SYS_ADMIN", "SYS_NICE", "SYS_PTRACE", "NET_ADMIN", "NET_RAW", "MKNOD"],
+    "SecurityOpt": ["seccomp=unconfined", "apparmor=unconfined"],
+    "Ulimits": [{"Name":"nofile", "Hard":10240, "Soft":10240}],
+    "Privileged": false,
+    "DeviceCgroupRules": ["c 13:* rmw", "c 244:* rmw", "c 10:55 rmw", "c 226:* rmw", "c 29:* rmw"]
+  }
+}
+\
+"""

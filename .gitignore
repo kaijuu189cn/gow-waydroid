@@ -1,0 +1,32 @@
+# --- Third-party / proprietary blobs, not redistributed here ---------------
+# Intel Houdini ARM translator. Fetch with build/houdini/fetch-houdini.sh.
+# See the note in build/Dockerfile; the image builds without it.
+apps/waydroid/build/houdini/libhoudini.zip
+apps/waydroid/build-fedora/houdini/libhoudini.zip
+
+# Patched libndk_translation .so blobs kept locally while investigating the
+# MAP_32BIT / high-address experiments. The small notes and patch scripts in
+# these directories ARE tracked; the multi-megabyte binaries are not.
+apps/waydroid/build/libndk-*/*.so
+apps/waydroid/build/libndk-*/*.so.*
+apps/waydroid/build-fedora/libndk-*/*.so
+apps/waydroid/build-fedora/libndk-*/*.so.*
+
+# Python virtualenv for the vendored waydroid_script. The Dockerfile recreates
+# it when absent (see the `if [ ! -x .../venv/bin/python3 ]` guard), so it does
+# not belong in version control.
+apps/waydroid/build/waydroid-script-vendor/venv/
+apps/waydroid/build-fedora/waydroid-script-vendor/venv/
+
+# --- Build / runtime byproducts -------------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.log
+*.tmp
+
+# --- Local investigation notes that must not be published -----------------
+# Kept on the working host only: may contain host paths, credentials in
+# captured logs, or proprietary dumps.
+diagnostics/
+*.local.md

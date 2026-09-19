@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""Patch Android 17 berberis libndk_translation.so so the code pool may grow
+into the full 64-bit address space (EXPERIMENTAL, 2 edits).
+
+WHY
+---
+Honor of Kings (com.tencent.tmgp.sgame) dies from translated-code-pool
+exhaustion, always at the bottom of the address space:
+
+    Abort: frameworks/libs/binary_translation/base/mmap_posix.cc:128:
+           CHECK failed: 0xffffffffffffffff != 0xffffffffffffffff
+      #04 berberis::MmapImplOrDie
+      #05 berberis::ExecRegionAnonymousFactory::Create
+      #06 berberis::CodePool<...>::Add
+      #07 berberis::TryLiteTranslateAndInstallRegion
+      #08 berberis::TranslateRegion<TranslationGear 0>
+      #09 berberis::ExecuteGuest
+
+Every crash across six runs top out at the same place -- 0x7fa00000..
+0x7fe00000, i.e. hard against the 2048 MB ceiling of the MAP_32BIT window:
+
+    tombstone   mode             uptime     regions   top address
+    _28         two-gear         18s        220       0x7fa00000
+    _29         interpret-only   24m        265       0x7fa00000
+    _30         interpret-only   7h29m      251       0x7fa00000
+    _31         interpret-only   25s        247       0x7fc00000
+    _32         interpret-only   15s        206       0x7fa00000
+    _33         interpret-only   16m        253       0x7fa00000
+
+A tombstone also shows ~235 MB sitting in *holes* below the frontier
+(128 MB at 0x52000000, 104 MB at 0x6f200000), i.e. the pool bump-allocates
+upward and cannot reuse the gaps -- so it fails while free space exists.
+
+`interpret-only` (see 20-waydroid-setup.sh section 4i) slows the consumption
+dramatically but does not remove the ceiling.
+
+WHY THE OBVIOUS PATCH FAILS
+---------------------------
+`or $0x40,%ecx` at 0x7a3db7 adds MAP_32BIT:
+
+    7a3daa: testb  $0x1,0x38(%rbp)   ; low_addr_required ?
+    7a3dae: je     7a3dba            ; no -> plain mmap
+    7a3db0: mov    %ecx,%eax
+    7a3db2: and    $0x10,%eax        ; MAP_FIXED set?
+    7a3db5: jne    7a3df1
+    7a3db7: or     $0x40,%ecx        ; MAP_32BIT
+    7a3dba: call   mmap@plt
+
+NOP-ing that (or zeroing the flag field) moves allocations above 2 GB, and
+berberis then rejects them at startup:
+
+    host_code.h:35: CHECK failed: IsInRange<HostCodeAddr>(...)
+      -> CodePool::Add -> InstallEntryTrampoline -> InitHostEntries
+      -> InitBerberis -> native_bridge_initialize
+
+zygote aborts before any app runs. The reason is visible in CodePool::Add:
+
+    3a911e: mov  %r15,%rax
+    3a9121: shr  $0x20,%rax     ; is the address above 4 GB?
+    3a9129: jne  3a9173         ; -> __android_log_assert
+
+i.e. `HostCodeAddr` is a 32-bit-narrowed type, and the host-entry trampoline
+genuinely must live low.
+
+WHAT THIS PATCH DOES DIFFERENTLY
+--------------------------------
+It relaxes *both* sides at once, so nothing is rejected, while leaving the
+rest of the translator untouched:
+
+    1. 0x3a9129  75 48  ->  90 90
+       Drop the "address must fit in 32 bits" gate in CodePool::Add.
+       (Both this instruction pattern and the host_code.h:35 string occur
+       exactly once in the binary, verified, so this is the only site.)
+
+    2. 0x7aaddb  01  ->  00
+       ExecRegionAnonymousFactory::Create builds two MmapImplArgs:
+
+         first  call (0x7aadd8): flags=0x100000005, low_addr=1  -> exec region
+         second call (0x7aae2a): flags=0x100000003, low_addr=0  -> data region
+
+       The `movl $0x1,-0x30(%rbp)` at 0x7aadd8 is the immediate for the first
+       call's low_addr field; the immediate byte lives at file offset 0x7aaddb.
+       Clearing it lets exec regions be placed anywhere mmap likes.
+
+   Total: 3 bytes changed. Because the gate in (1) no longer fires, the
+   trampoline being placed high is tolerated instead of aborting.
+
+STATUS: EXPERIMENTAL -- NOT YET VERIFIED END TO END
+---------------------------------------------------
+Verified so far: the patched library is staged in the Waydroid overlay and
+Android reaches boot_completed=1 with no new tombstone (previous attempts
+crashed zygote immediately). Effect on code-pool headroom during gameplay has
+not yet been measured on a live session.
+
+If it works, expect the pool to stop being confined to the low window and the
+~235 MB of holes to become usable, greatly extending how long a session lasts.
+If it regresses, remove the overlay file and set mount_overlays=False:
+
+    rm -f /var/lib/waydroid/overlay/system/lib64/libndk_translation.so
+
+OFFSETS
+-------
+berberis 16.0.0 x86_64 (LineageOS 24.0 / Android 17), libndk_translation.so,
+8,743,696 bytes, BuildId 125abe4474cee6c228658bad2f793726. PIE with
+.text vaddr == file offset.
+
+    0x3a9129   jne 0x3a9173  ->  nop nop
+    0x7aaddb   movl imm 1 -> 0    (low_addr_required for exec regions)
+
+Verify after patching:
+
+    objdump -d --start-address=0x3a9125 --stop-address=0x3a912d <file>
+    objdump -d --start-address=0x7aadd8 --stop-address=0x7aaddf <file>
+
+USAGE
+-----
+    python3 patch-libndk-highaddr.py <libndk_translation.so>
+
+The input file is modified in place; refuses to patch if the bytes do not
+match this exact revision.
+"""
+import sys
+
+SIZE = 8743696
+BUILD_ID = "125abe4474cee6c228658bad2f793726"
+
+# (file_offset, expected_bytes, replacement_bytes, description)
+PATCHES = [
+    (0x3A9129, "7548", "9090",
+     "CodePool::Add: drop 32-bit IsInRange<HostCodeAddr> gate"),
+    (0x7AADDB, "01", "00",
+     "ExecRegionAnonymousFactory::Create: low_addr_required 1 -> 0"),
+]
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(__doc__)
+        return 2
+
+    path = sys.argv[1]
+    data = bytearray(open(path, "rb").read())
+
+    if len(data) != SIZE:
+        print(f"WARNING: size {len(data)} != known {SIZE}; continuing anyway")
+
+    for offset, expect, replacement, desc in PATCHES:
+        actual = data[offset:offset + len(expect) // 2].hex()
+        if actual != expect:
+            print(f"FAIL @0x{offset:x}: expected {expect}, found {actual}")
+            print("Refusing to patch: the binary does not match this revision.")
+            return 1
+        data[offset:offset + len(replacement) // 2] = bytes.fromhex(replacement)
+        print(f"OK   @0x{offset:x}: {desc}")
+
+    open(path, "wb").write(data)
+    print("patched:", path)
+    print(f"BuildId expected: {BUILD_ID}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
