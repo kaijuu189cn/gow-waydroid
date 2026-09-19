@@ -1,5 +1,7 @@
 # Waydroid (Android)
 
+![Waydroid screenshot](assets/screenshot.png)
+
 [Waydroid](https://waydro.id/) runs a full Android system (LineageOS, Android 13)
 inside a Linux container and renders it through the host's Wayland compositor.
 This image lets you stream a complete Android desktop, or a single Android app,
