@@ -33,6 +33,67 @@ so there is no upstream version to diff against — this tree *is* the app.
 
 ---
 
+## Screenshots
+
+### Android desktop
+
+LineageOS 20 rendering straight into Wolf's virtual compositor, captured from the
+Moonlight stream.
+
+| | |
+| --- | --- |
+| ![Android desktop at 1080p](docs/screenshots/desktop-1080p.jpg) | ![Android launcher](docs/screenshots/desktop-launcher.jpg) |
+
+### Honor of Kings
+
+Honor of Kings (王者荣耀) is the title that drove most of the work recorded in
+`docs/` — the periodic in-match crash and the per-session audio fix were both
+found chasing this game.
+
+![Honor of Kings in an online match](docs/screenshots/hok-match.jpg)
+
+| | |
+| --- | --- |
+| ![Honor of Kings launch screen](docs/screenshots/hok-login-daqiao.jpg) | ![Match result screen](docs/screenshots/hok-match-result.jpg) |
+
+### Dialogs worth recognising
+
+Real states this image produces. Knowing them saves chasing the wrong thing —
+all four are explained in `docs/`.
+
+| | |
+| --- | --- |
+| ![Log-access dialog stacked behind an ANR dialog](docs/screenshots/dialog-log-access-and-anr.png) | ![ANR dialog](docs/screenshots/dialog-anr.png) |
+
+<details>
+<summary><b>The remaining 14 screenshots</b> (desktop variants, more launch screens, the other two dialogs)</summary>
+
+**Android desktop, other states**
+
+| | | |
+| --- | --- | --- |
+| ![Desktop with taskbar](docs/screenshots/desktop-taskbar.jpg) | ![Desktop](docs/screenshots/desktop-2.jpg) | ![Desktop](docs/screenshots/desktop-3.jpg) |
+
+**Honor of Kings — splash and launch screens**
+
+| | |
+| --- | --- |
+| ![Splash](docs/screenshots/hok-splash.jpg) | ![Splash](docs/screenshots/hok-splash-2.jpg) |
+| ![Launch screen](docs/screenshots/hok-login-xiaoqiao.jpg) | ![Launch screen](docs/screenshots/hok-login-yao.jpg) |
+| ![Launch screen](docs/screenshots/hok-login-yao-2.jpg) | ![Launch screen](docs/screenshots/hok-login-city.jpg) |
+| ![Launch screen](docs/screenshots/hok-login-city-2.jpg) | ![Launch screen](docs/screenshots/hok-login-city-3.jpg) |
+| ![Launch screen](docs/screenshots/hok-login-city-4.jpg) | |
+
+**Other dialogs**
+
+| | |
+| --- | --- |
+| ![Abnormal environment warning](docs/screenshots/dialog-abnormal-environment.jpg) | ![Network error](docs/screenshots/dialog-network-error.jpg) |
+
+</details>
+
+---
+
 ## Repository layout
 
 ```
@@ -56,13 +117,20 @@ docs/
 ├── android13-translator-analysis.md, berberis-comparison.md
 ├── waydroid-hok-*.md         Honor of Kings crash investigation, round by round
 ├── waydroid-audio-isolation-fix.md
-└── wolf-debug-method.md      how to drive Wolf for headless debugging
+├── wolf-debug-method.md      how to drive Wolf for headless debugging
+└── screenshots/              21 screenshots (see above)
 
 tools/
-└── verify-image.sh           post-build check for every fix that once regressed
+├── verify-image.sh           post-build check for every fix that once regressed
+└── make-upstream-patch.sh    generates a patch adding this app to upstream gow
 
 CONTRIBUTING.md               gow app conventions, and how to submit this upstream
 ```
+
+Note that the screenshots live in `docs/`, not in `apps/waydroid/assets/`: the
+upstream convention is that an app's `assets/` holds exactly one `screenshot.png`
+for its docs page, so keeping the gallery out of the app directory keeps the
+upstream patch lean.
 
 ---
 
